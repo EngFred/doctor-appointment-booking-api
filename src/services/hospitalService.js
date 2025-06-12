@@ -1,6 +1,7 @@
 import prisma from '../config/database.js';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
+import { uploadToCloudinary } from '../config/cloudinary.js';
 
 // Validation schemas
 const hospitalSchema = z.object({
@@ -20,12 +21,19 @@ const hospitalSchema = z.object({
 
 const idSchema = z.string().uuid('Invalid UUID');
 
-export const createHospital = async (data) => {
+export const createHospital = async (data, file) => {
   const validatedData = hospitalSchema.parse(data);
+
+  let image = null;
+  if (file) {
+    image = await uploadToCloudinary(file.buffer, file.originalname, 'hospitals', 'hospital');
+  }
+
   return await prisma.hospital.create({
     data: {
       ...validatedData,
-      metadata: validatedData.metadata || {}, // Initialize metadata
+      image,
+      metadata: validatedData.metadata || {},
     },
     select: {
       id: true,
@@ -109,15 +117,22 @@ export const getHospitalById = async (id) => {
   });
 
   if (!hospital) {
-    throw new Error('Hospital not found');
+    const error = new Error('Hospital not found');
+    error.statusCode = 404;
+    throw error;
   }
 
   return hospital;
 };
 
-export const updateHospital = async (id, data) => {
+export const updateHospital = async (id, data, file) => {
   const validatedId = idSchema.parse(id);
-  const validatedData = hospitalSchema.partial().parse(data); // Allow partial updates
+  const validatedData = hospitalSchema.partial().parse(data);
+
+  if (file) {
+    validatedData.image = await uploadToCloudinary(file.buffer, file.originalname, 'hospitals', 'hospital');
+  }
+
   try {
     return await prisma.hospital.update({
       where: { id: validatedId },
@@ -141,7 +156,9 @@ export const updateHospital = async (id, data) => {
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
-      throw new Error('Hospital not found');
+      const error = new Error('Hospital not found');
+      error.statusCode = 404;
+      throw error;
     }
     throw err;
   }
@@ -150,15 +167,18 @@ export const updateHospital = async (id, data) => {
 export const deleteHospital = async (id) => {
   const validatedId = idSchema.parse(id);
   try {
-    // Check for associated doctors
     const doctorCount = await prisma.doctor.count({ where: { hospitalId: validatedId } });
     if (doctorCount > 0) {
-      throw new Error('Cannot delete hospital with associated doctors');
+      const error = new Error('Cannot delete hospital with associated doctors');
+      error.statusCode = 400;
+      throw error;
     }
     await prisma.hospital.delete({ where: { id: validatedId } });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
-      throw new Error('Hospital not found');
+      const error = new Error('Hospital not found');
+      error.statusCode = 404;
+      throw error;
     }
     throw err;
   }

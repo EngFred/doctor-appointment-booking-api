@@ -1,6 +1,7 @@
 import prisma from '../config/database.js';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
+import { uploadToCloudinary } from '../config/cloudinary.js';
 
 // Validation schemas
 const doctorSchema = z.object({
@@ -88,22 +89,34 @@ export const getDoctorById = async (id) => {
   });
 
   if (!doctor) {
-    throw new Error('Doctor not found');
+    const error = new Error('Doctor not found');
+    error.statusCode = 404;
+    throw error;
   }
 
   return doctor;
 };
 
-export const createDoctor = async (data) => {
+export const createDoctor = async (data, file) => {
   const validatedData = doctorSchema.parse(data);
   const { hospitalId } = validatedData;
 
   const hospital = await prisma.hospital.findUnique({ where: { id: hospitalId } });
-  if (!hospital) throw new Error('Hospital not found');
+  if (!hospital) {
+    const error = new Error('Hospital not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  let profilePicture = null;
+  if (file) {
+    profilePicture = await uploadToCloudinary(file.buffer, file.originalname, 'profiles', 'doctor');
+  }
 
   return await prisma.doctor.create({
     data: {
       ...validatedData,
+      profilePicture,
     },
     select: {
       id: true,
@@ -117,13 +130,21 @@ export const createDoctor = async (data) => {
   });
 };
 
-export const updateDoctor = async (id, data) => {
+export const updateDoctor = async (id, data, file) => {
   const validatedId = idSchema.parse(id);
-  const validatedData = doctorSchema.partial().parse(data); // Allow partial updates
+  const validatedData = doctorSchema.partial().parse(data);
 
   if (validatedData.hospitalId) {
     const hospital = await prisma.hospital.findUnique({ where: { id: validatedData.hospitalId } });
-    if (!hospital) throw new Error('Hospital not found');
+    if (!hospital) {
+      const error = new Error('Hospital not found');
+      error.statusCode = 404;
+      throw error;
+    }
+  }
+
+  if (file) {
+    validatedData.profilePicture = await uploadToCloudinary(file.buffer, file.originalname, 'profiles', 'doctor');
   }
 
   try {
@@ -143,7 +164,9 @@ export const updateDoctor = async (id, data) => {
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
-      throw new Error('Doctor not found');
+      const error = new Error('Doctor not found');
+      error.statusCode = 404;
+      throw error;
     }
     throw err;
   }
@@ -152,7 +175,6 @@ export const updateDoctor = async (id, data) => {
 export const deleteDoctor = async (id) => {
   const validatedId = idSchema.parse(id);
 
-  // Check for associated appointments or availability
   const appointmentCount = await prisma.appointment.count({
     where: { doctorId: validatedId, status: { in: ['PENDING', 'CONFIRMED'] } },
   });
@@ -161,17 +183,23 @@ export const deleteDoctor = async (id) => {
   });
 
   if (appointmentCount > 0) {
-    throw new Error('Cannot delete doctor with pending or confirmed appointments');
+    const error = new Error('Cannot delete doctor with pending or confirmed appointments');
+    error.statusCode = 400;
+    throw error;
   }
   if (availabilityCount > 0) {
-    throw new Error('Cannot delete doctor with available slots');
+    const error = new Error('Cannot delete doctor with available slots');
+    error.statusCode = 400;
+    throw error;
   }
 
   try {
     await prisma.doctor.delete({ where: { id: validatedId } });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
-      throw new Error('Doctor not found');
+      const error = new Error('Doctor not found');
+      error.statusCode = 404;
+      throw error;
     }
     throw err;
   }

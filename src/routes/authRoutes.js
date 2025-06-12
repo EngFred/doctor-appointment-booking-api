@@ -1,7 +1,8 @@
 import express from 'express';
-import { register, login, getMe, refresh, logout } from '../controllers/authController.js';
+import { register, login, getMe, refresh, logout, updateProfilePicture } from '../controllers/authController.js';
 import { protect } from '../middlewares/authMiddleware.js';
 import rateLimit from 'express-rate-limit';
+import upload from '../middlewares/multer.js';
 
 const router = express.Router();
 
@@ -17,5 +18,6 @@ router.post('/login', authLimiter, login);
 router.post('/refresh', refresh);
 router.get('/me', protect, getMe);
 router.post('/logout', protect, logout);
+router.put('/api/auth/profile-picture', protect, upload.single('profilePicture'), updateProfilePicture);
 
 export default router;

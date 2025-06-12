@@ -2,7 +2,7 @@ import * as hospitalService from '../services/hospitalService.js';
 
 export const createHospital = async (req, res, next) => {
   try {
-    const hospital = await hospitalService.createHospital(req.body);
+    const hospital = await hospitalService.createHospital(req.body, req.file);
     res.status(201).json({
       status: 'success',
       data: hospital,
@@ -46,7 +46,7 @@ export const getHospitalById = async (req, res, next) => {
 
 export const updateHospital = async (req, res, next) => {
   try {
-    const hospital = await hospitalService.updateHospital(req.params.id, req.body);
+    const hospital = await hospitalService.updateHospital(req.params.id, req.body, req.file);
     res.status(200).json({
       status: 'success',
       data: hospital,

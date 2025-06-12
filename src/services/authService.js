@@ -2,6 +2,8 @@ import bcrypt from 'bcryptjs';
 import { generateAccessToken, generateRefreshToken } from '../utils/generateToken.js';
 import prisma from '../config/database.js';
 import { z } from 'zod';
+import jwt from 'jsonwebtoken';
+import { uploadToCloudinary } from '../config/cloudinary.js';
 
 // Validation schemas
 const registerSchema = z.object({
@@ -181,4 +183,28 @@ export const logout = async (userId) => {
     where: { id: userId },
     data: { refreshToken: null },
   });
+};
+
+export const updateProfilePicture = async (userId, file) => {
+  if (!file) {
+    const error = new Error('Profile picture is required');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const profilePicture = await uploadToCloudinary(file.buffer, file.originalname, 'profiles', 'user')
+  const user = await prisma.user.update({
+    where: { id: userId },
+    data: { profilePicture },
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      role: true,
+      profilePicture: true,
+    },
+  });
+
+  return user;
 };

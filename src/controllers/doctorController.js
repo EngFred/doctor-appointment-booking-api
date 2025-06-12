@@ -33,7 +33,7 @@ export const getDoctorById = async (req, res, next) => {
 
 export const createDoctor = async (req, res, next) => {
   try {
-    const doctor = await doctorService.createDoctor(req.body);
+    const doctor = await doctorService.createDoctor(req.body, req.file);
     res.status(201).json({
       status: 'success',
       data: doctor,
@@ -45,7 +45,7 @@ export const createDoctor = async (req, res, next) => {
 
 export const updateDoctor = async (req, res, next) => {
   try {
-    const doctor = await doctorService.updateDoctor(req.params.id, req.body);
+    const doctor = await doctorService.updateDoctor(req.params.id, req.body, req.file);
     res.status(200).json({
       status: 'success',
       data: doctor,

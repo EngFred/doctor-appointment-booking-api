@@ -64,3 +64,15 @@ export const logout = async (req, res, next) => {
     next(err);
   }
 };
+
+export const updateProfilePicture = async (req, res, next) => {
+  try {
+    const user = await authService.updateProfilePicture(req.user.id, req.file);
+    res.status(200).json({
+      status: 'success',
+      data: user,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
