@@ -1,0 +1,241 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Represents a user (patient or admin) in the system
+model User {
+  id             String        @id @default(uuid())
+  firstName      String
+  lastName       String
+  email          String        @unique @map("email")
+  password       String
+  profilePicture String?
+  role           Role          @default(PATIENT)
+  refreshToken   String? // For JWT refresh tokens, store securely
+  metadata       Json? // Flexible storage for user preferences, e.g., FCM tokens
+  appointments   Appointment[] @relation("PatientAppointments")
+  messages       Message[]     @relation("SenderMessages")
+  payments       Payment[]     @relation("UserPayments")
+  notifications  Notification[] @relation("UserNotifications")
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([email])
+}
+
+/// Represents a hospital in the system
+model Hospital {
+  id            String    @id @default(uuid())
+  name          String
+  address       String
+  phone         String
+  image         String?
+  latitude      Float?
+  longitude     Float?
+  about         String?
+  services      String[]
+  contactPhone  String?
+  contactEmail  String? @map("contact_email")
+  rating        Float?
+  doctors       Doctor[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([name])
+  @@index([latitude, longitude])
+}
+
+/// Represents a doctor in the system
+model Doctor {
+  id             String    @id @default(uuid())
+  firstName      String
+  lastName       String
+  specialty      String
+  hospitalId     String
+  profilePicture String?
+  hospital       Hospital  @relation(fields: [hospitalId], references: [id])
+  appointments   Appointment[] @relation("DoctorAppointments")
+  availability   Availability[] @relation("DoctorAvailability")
+  messages       Message[] @relation("ReceiverMessages")
+  metadata       Json? // Flexible storage, e.g., FCM tokens
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([hospitalId])
+  @@index([specialty])
+}
+
+/// Represents an appointment (in-person or virtual with video/audio/text)
+model Appointment {
+  id               String           @id @default(uuid())
+  patientId        String
+  doctorId         String
+  availabilityId   String?          @unique
+  paymentId        String?          @unique
+  scheduledAt      DateTime
+  type             AppointmentType
+  consultationType ConsultationType? // Mandatory for VIRTUAL; enforced in application layer
+  status           AppointmentStatus @default(PENDING)
+  sessionId        String? // For Agora video/audio session
+  startTime        DateTime? // Mandatory for VIRTUAL appointments; enforced in application layer
+  endTime          DateTime? // Mandatory for VIRTUAL appointments; enforced in application layer
+  duration         Int? // Duration in minutes for VIRTUAL appointments; enforced in application layer
+  location         String? // For in-person appointments
+  notes            String?
+  metadata         Json?
+  patient          User            @relation("PatientAppointments", fields: [patientId], references: [id])
+  doctor           Doctor          @relation("DoctorAppointments", fields: [doctorId], references: [id])
+  availability     Availability?   @relation("AppointmentAvailability", fields: [availabilityId], references: [id])
+  payment          Payment?        @relation("AppointmentPayment", fields: [paymentId], references: [id])
+  messages         Message[]       @relation("AppointmentMessages")
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([doctorId, scheduledAt])
+  @@index([patientId, status])
+}
+
+/// Represents a chat message in a virtual appointment (for TEXT consultationType)
+model Message {
+  id             String      @id @default(uuid())
+  appointmentId  String
+  content        String
+  messageType    MessageType @default(TEXT)
+  senderId       String
+  receiverId     String
+  sentAt         DateTime    @default(now())
+  readAt         DateTime?
+  appointment    Appointment @relation("AppointmentMessages", fields: [appointmentId], references: [id])
+  sender         User        @relation("SenderMessages", fields: [senderId], references: [id])
+  receiver       Doctor      @relation("ReceiverMessages", fields: [receiverId], references: [id])
+
+  @@index([appointmentId, sentAt])
+}
+
+/// Represents a doctor's availability slot
+model Availability {
+  id        String   @id @default(uuid())
+  doctorId  String
+  startTime DateTime
+  endTime   DateTime
+  status    AvailabilityStatus @default(AVAILABLE)
+  doctor    Doctor   @relation("DoctorAvailability", fields: [doctorId], references: [id])
+  appointment Appointment? @relation("AppointmentAvailability")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([doctorId, startTime])
+}
+
+/// Represents a payment for an appointment
+model Payment {
+  id            String   @id @default(uuid())
+  userId        String
+  amount        Float
+  currency      Currency @default(UGX)
+  paymentMethod PaymentMethod
+  paymentType   PaymentType
+  transactionId String?
+  txRef         String?
+  phone         String
+  email         String
+  status        PaymentStatus @default(PENDING)
+  paymentDate   DateTime?
+  user          User     @relation("UserPayments", fields: [userId], references: [id])
+  appointment   Appointment? @relation("AppointmentPayment")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId, status])
+}
+
+/// Represents a notification sent to users
+model Notification {
+  id               String   @id @default(uuid())
+  userId           String
+  title            String
+  body             String
+  notificationType NotificationType
+  status           NotificationStatus @default(PENDING)
+  sentAt           DateTime?
+  user             User     @relation("UserNotifications", fields: [userId], references: [id])
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([userId, sentAt])
+}
+
+enum Role {
+  PATIENT
+  ADMIN
+}
+
+enum AppointmentType {
+  IN_PERSON
+  VIRTUAL
+}
+
+enum ConsultationType {
+  VIDEO
+  AUDIO
+  TEXT
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum AvailabilityStatus {
+  AVAILABLE
+  BOOKED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum PaymentMethod {
+  MTN
+  AIRTEL
+}
+
+enum PaymentType {
+  MOBILE_MONEY
+  CARD
+}
+
+enum Currency {
+  KES
+  UGX
+  USD
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+}
+
+enum NotificationType {
+  APPOINTMENT_CONFIRMED
+  APPOINTMENT_CANCELLED
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+  MESSAGE_RECEIVED
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
