@@ -2,10 +2,10 @@ import * as userService from '../services/userService.js';
 
 export const getAllUsers = async (req, res, next) => {
   try {
-    if (req.user.role !== 'ADMIN') {
+    if (req.user.role !== 'SUPER_ADMIN') {
       return res.status(403).json({
         status: 'error',
-        error: 'Admin access required',
+        message: 'Super Admin access required',
       });
     }
     const { skip, take, role, email, name } = req.query;
@@ -27,10 +27,10 @@ export const getAllUsers = async (req, res, next) => {
 
 export const getUserById = async (req, res, next) => {
   try {
-    if (req.user.role !== 'ADMIN' && req.user.id !== req.params.id) {
+    if (req.user.role !== 'SUPER_ADMIN' && req.user.id !== req.params.id) {
       return res.status(403).json({
         status: 'error',
-        error: 'Unauthorized access',
+        message: 'Unauthorized: Can only view your own profile',
       });
     }
     const user = await userService.getUserById(req.params.id);

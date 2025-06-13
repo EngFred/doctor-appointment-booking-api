@@ -31,6 +31,18 @@ export const getDoctorById = async (req, res, next) => {
   }
 };
 
+export const getCurrentDoctor = async (req, res, next) => {
+  try {
+    const doctor = await doctorService.getCurrentDoctor(req.user.id);
+    res.status(200).json({
+      status: 'success',
+      data: doctor,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const createDoctor = async (req, res, next) => {
   try {
     const doctor = await doctorService.createDoctor(req.body, req.file);
@@ -46,6 +58,19 @@ export const createDoctor = async (req, res, next) => {
 export const updateDoctor = async (req, res, next) => {
   try {
     const doctor = await doctorService.updateDoctor(req.params.id, req.body, req.file);
+    res.status(200).json({
+      status: 'success',
+      data: doctor,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const updateDoctorFcmToken = async (req, res, next) => {
+  try {
+    const { fcmToken } = req.body;
+    const doctor = await doctorService.updateDoctorFcmToken(req.user.id, fcmToken);
     res.status(200).json({
       status: 'success',
       data: doctor,

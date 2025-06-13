@@ -3,30 +3,33 @@ import { z } from 'zod';
 
 // Validation schemas
 const initiateAppointmentSchema = z.object({
-  doctorId: z.string().uuid('Invalid doctor ID'),
-  availabilityId: z.string().uuid('Invalid availability ID'),
+  doctorId: z.string().uuid({ message: 'Invalid doctor ID' }),
+  availabilityId: z.string().uuid({ message: 'Invalid availability ID' }),
   type: z.enum(['IN_PERSON', 'VIRTUAL'], { message: 'Invalid appointment type' }),
   consultationType: z
     .enum(['VIDEO', 'AUDIO', 'TEXT'], { message: 'Invalid consultation type' })
     .optional(),
-  duration: z.number().int().positive('Duration must be a positive integer').optional(),
+  duration: z.number().int().positive({ message: 'Duration must be a positive integer' }).optional(),
+  notes: z.string().optional(),
 });
 
-const idSchema = z.string().uuid('Invalid UUID');
-
-const cancelAppointmentSchema = z.object({
-  reason: z.string().min(1, 'Cancellation reason is required').optional(),
-});
+const idSchema = z.string().uuid({ message: 'Invalid UUID' });
 
 export const initiateAppointment = async (data, user, log) => {
-  if (user.role !== 'PATIENT') {
-    const error = new Error('Only patients can initiate appointments');
+  if (user.role !== 'PATIENT' && user.role !== 'DOCTOR') {
+    const error = new Error('Only patients or doctors can initiate appointments');
     error.statusCode = 403;
     throw error;
   }
 
   const validatedData = initiateAppointmentSchema.parse(data);
-  const { doctorId, availabilityId, type, consultationType, duration } = validatedData;
+  const { doctorId, availabilityId, type, consultationType, duration, notes } = validatedData;
+
+  if (doctorId === user.id) {
+    const error = new Error('Cannot book an appointment with yourself');
+    error.statusCode = 400;
+    throw error;
+  }
 
   if (type === 'VIRTUAL' && !consultationType) {
     const error = new Error('Consultation type is required for virtual appointments');
@@ -35,9 +38,9 @@ export const initiateAppointment = async (data, user, log) => {
   }
 
   try {
-    const doctor = await prisma.doctor.findFirst({
-      where: { id: doctorId },
-      select: { id: true },
+    const doctor = await prisma.user.findFirst({
+      where: { id: doctorId, role: 'DOCTOR' },
+      select: { id: true, firstName: true, lastName: true },
     });
 
     if (!doctor) {
@@ -85,7 +88,21 @@ export const initiateAppointment = async (data, user, log) => {
           type,
           consultationType: type === 'VIRTUAL' ? consultationType : null,
           status: 'PENDING',
-          duration: type === 'VIRTUAL' ? duration || 30 : null,
+          duration: duration || 30,
+          notes,
+        },
+        select: {
+          id: true,
+          patientId: true,
+          doctorId: true,
+          availabilityId: true,
+          scheduledAt: true,
+          type: true,
+          consultationType: true,
+          status: true,
+          duration: true,
+          notes: true,
+          createdAt: true,
         },
       });
 
@@ -94,7 +111,29 @@ export const initiateAppointment = async (data, user, log) => {
         data: { status: 'BOOKED' },
       });
 
-      log.info(`Appointment ${appointment.id} initiated for patient ${user.id}`);
+      await tx.notification.create({
+        data: {
+          recipientId: user.id,
+          title: 'Appointment Booked',
+          body: `You have booked an appointment with Dr. ${doctor.firstName} ${doctor.lastName} on ${availability.startTime.toISOString()}.`,
+          notificationType: 'APPOINTMENT_BOOKED',
+          status: 'PENDING',
+          metadata: { appointmentId: appointment.id },
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          recipientId: doctorId,
+          title: 'New Appointment',
+          body: `A new appointment has been booked by ${user.firstName} ${user.lastName} on ${availability.startTime.toISOString()}.`,
+          notificationType: 'APPOINTMENT_BOOKED',
+          status: 'PENDING',
+          metadata: { appointmentId: appointment.id },
+        },
+      });
+
+      log.info(`Appointment ${appointment.id} initiated for user ${user.id} with doctor ${doctorId}`);
       return appointment;
     });
   } catch (err) {
@@ -103,15 +142,16 @@ export const initiateAppointment = async (data, user, log) => {
   }
 };
 
-export const getAppointments = async ({ skip = 0, take = 10, status, doctorId }, user, logger) => {
+export const getAppointments = async ({ skip = 0, take = 10, status, doctorId }, user, log) => {
   try {
-    const where = {
-      OR: [
+    let where = {};
+    if (user.role === 'SUPER_ADMIN') {
+    } else {
+      where.OR = [
         { patientId: user.id },
         { doctorId: user.id },
-        ...(user.role === 'ADMIN' ? [{ id: { not: null } }] : []),
-      ],
-    };
+      ];
+    }
 
     if (status) where.status = status;
     if (doctorId) where.doctorId = idSchema.parse(doctorId);
@@ -131,6 +171,7 @@ export const getAppointments = async ({ skip = 0, take = 10, status, doctorId },
         consultationType: true,
         status: true,
         duration: true,
+        notes: true,
         createdAt: true,
         patient: {
           select: { id: true, firstName: true, lastName: true, email: true },
@@ -144,15 +185,15 @@ export const getAppointments = async ({ skip = 0, take = 10, status, doctorId },
       },
     });
 
-    logger.info(`Fetched ${appointments.length} appointments for user ${user.id}`);
+    log.info(`Fetched ${appointments.length} appointments for user ${user.id}`);
     return appointments;
   } catch (err) {
-    logger.error(`Failed to fetch appointments: ${err.message}`);
+    log.error(`Failed to fetch appointments: ${err.message}`);
     throw err;
   }
 };
 
-export const getAppointmentById = async (id, user, logger) => {
+export const getAppointmentById = async (id, user, log) => {
   try {
     const validatedId = idSchema.parse(id);
     const appointment = await prisma.appointment.findUnique({
@@ -167,6 +208,7 @@ export const getAppointmentById = async (id, user, logger) => {
         consultationType: true,
         status: true,
         duration: true,
+        notes: true,
         createdAt: true,
         updatedAt: true,
         patient: {
@@ -188,7 +230,7 @@ export const getAppointmentById = async (id, user, logger) => {
     }
 
     if (
-      user.role !== 'ADMIN' &&
+      user.role !== 'SUPER_ADMIN' &&
       user.id !== appointment.patientId &&
       user.id !== appointment.doctorId
     ) {
@@ -197,18 +239,17 @@ export const getAppointmentById = async (id, user, logger) => {
       throw error;
     }
 
-    logger.info(`Fetched appointment ${id} for user ${user.id}`);
+    log.info(`Fetched appointment ${id} for user ${user.id}`);
     return appointment;
   } catch (err) {
-    logger.error(`Failed to fetch appointment ${id}: ${err.message}`);
+    log.error(`Failed to fetch appointment ${id}: ${err.message}`);
     throw err;
   }
 };
 
-export const cancelAppointment = async (id, user, reason, logger) => {
+export const cancelAppointment = async (id, user, log) => {
   try {
     const validatedId = idSchema.parse(id);
-    const validatedReason = cancelAppointmentSchema.parse({ reason });
 
     const appointment = await prisma.appointment.findUnique({
       where: { id: validatedId },
@@ -220,6 +261,8 @@ export const cancelAppointment = async (id, user, reason, logger) => {
         scheduledAt: true,
         type: true,
         status: true,
+        patient: { select: { firstName: true, lastName: true } },
+        doctor: { select: { firstName: true, lastName: true } },
       },
     });
 
@@ -229,8 +272,8 @@ export const cancelAppointment = async (id, user, reason, logger) => {
       throw error;
     }
 
-    if (user.role !== 'ADMIN' && user.id !== appointment.patientId) {
-      const error = new Error('Unauthorized access');
+    if (user.role !== 'SUPER_ADMIN' && user.id !== appointment.patientId) {
+      const error = new Error('Unauthorized: Only patients or Super Admins can cancel appointments');
       error.statusCode = 403;
       throw error;
     }
@@ -255,28 +298,52 @@ export const cancelAppointment = async (id, user, reason, logger) => {
         where: { id: validatedId },
         data: {
           status: 'CANCELLED',
-          metadata: { cancellationReason: reason },
+          metadata: {},
         },
       });
 
-      await tx.availability.update({
-        where: { id: appointment.availabilityId },
-        data: { status: 'AVAILABLE' },
+      if (appointment.availabilityId) {
+        await tx.availability.update({
+          where: { id: appointment.availabilityId },
+          data: { status: 'AVAILABLE' },
+        });
+      }
+
+      await tx.notification.create({
+        data: {
+          recipientId: appointment.patientId,
+          title: 'Appointment Cancelled',
+          body: `Your appointment with Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName} has been cancelled.`,
+          notificationType: 'APPOINTMENT_CANCELLED',
+          status: 'PENDING',
+          metadata: { appointmentId: appointment.id },
+        },
       });
 
-      logger.info(`Appointment ${id} cancelled by user ${user.id}`);
+      await tx.notification.create({
+        data: {
+          recipientId: appointment.doctorId,
+          title: 'Appointment Cancelled',
+          body: `An appointment with ${appointment.patient.firstName} ${appointment.patient.lastName} has been cancelled.`,
+          notificationType: 'APPOINTMENT_CANCELLED',
+          status: 'PENDING',
+          metadata: { appointmentId: appointment.id },
+        },
+      });
+
+      log.info(`Appointment ${id} cancelled by user ${user.id}`);
       return await tx.appointment.findUnique({
         where: { id: validatedId },
         select: { id: true, status: true, metadata: true },
       });
     });
   } catch (err) {
-    logger.error(`Failed to cancel appointment ${id}: ${err.message}`);
+    log.error(`Failed to cancel appointment ${id}: ${err.message}`);
     throw err;
   }
 };
 
-export const joinAppointment = async (id, user, logger) => {
+export const joinAppointment = async (id, user, log) => {
   try {
     const validatedId = idSchema.parse(id);
     const appointment = await prisma.appointment.findUnique({
@@ -300,7 +367,7 @@ export const joinAppointment = async (id, user, logger) => {
     }
 
     if (
-      user.role !== 'ADMIN' &&
+      user.role !== 'SUPER_ADMIN' &&
       user.id !== appointment.patientId &&
       user.id !== appointment.doctorId
     ) {
@@ -325,32 +392,32 @@ export const joinAppointment = async (id, user, logger) => {
     }
 
     if (appointment.type === 'IN_PERSON') {
-      logger.info(`User ${user.id} accessed IN_PERSON appointment ${id}`);
+      log.info(`User ${user.id} accessed IN_PERSON appointment ${id}`);
       return {
         type: 'IN_PERSON',
         message: 'In-person appointment. No virtual session required.',
       };
     }
 
-    if (appointment.type === 'VIRTUAL') {
-      logger.info(`User ${user.id} joined VIRTUAL appointment ${id}`);
+    if (appointment.type === 'VIRTUAL' && ['VIDEO', 'AUDIO', 'TEXT'].includes(appointment.consultationType)) {
+      log.info(`User ${user.id} joined VIRTUAL appointment ${id}`);
       return {
         type: 'VIRTUAL',
         consultationType: appointment.consultationType,
-        message: 'Virtual appointment. Session handled by mobile app.',
+        joinUrl: `https://video.afrodoctor.com/room/${appointment.id}`,
       };
     }
 
-    const error = new Error('Invalid appointment type');
+    const error = new Error('Invalid appointment type or consultation type');
     error.statusCode = 400;
     throw error;
   } catch (err) {
-    logger.error(`Failed to join appointment ${id}: ${err.message}`);
+    log.error(`Failed to join appointment ${id}: ${err.message}`);
     throw err;
   }
 };
 
-export const confirmAppointment = async (id, user, logger) => {
+export const confirmAppointment = async (id, user, log) => {
   try {
     const validatedId = idSchema.parse(id);
 
@@ -362,6 +429,9 @@ export const confirmAppointment = async (id, user, logger) => {
         doctorId: true,
         status: true,
         type: true,
+        scheduledAt: true,
+        patient: { select: { firstName: true, lastName: true } },
+        doctor: { select: { firstName: true, lastName: true } },
       },
     });
 
@@ -371,8 +441,8 @@ export const confirmAppointment = async (id, user, logger) => {
       throw error;
     }
 
-    if (user.role !== 'ADMIN' && user.id !== appointment.doctorId) {
-      const error = new Error('Unauthorized access');
+    if (user.role !== 'SUPER_ADMIN' && user.id !== appointment.doctorId) {
+      const error = new Error('Unauthorized: Only doctors or Super Admins can confirm appointments');
       error.statusCode = 403;
       throw error;
     }
@@ -389,19 +459,41 @@ export const confirmAppointment = async (id, user, logger) => {
         data: { status: 'CONFIRMED' },
       });
 
-      logger.info(`Appointment ${id} confirmed by user ${user.id}`);
+      await tx.notification.create({
+        data: {
+          recipientId: appointment.patientId,
+          title: 'Appointment Confirmed',
+          body: `Your appointment with Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName} on ${appointment.scheduledAt.toISOString()} has been confirmed.`,
+          notificationType: 'APPOINTMENT_CONFIRMED',
+          status: 'PENDING',
+          metadata: { appointmentId: appointment.id },
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          recipientId: appointment.doctorId,
+          title: 'Appointment Confirmed',
+          body: `You have confirmed an appointment with ${appointment.patient.firstName} ${appointment.patient.lastName} on ${appointment.scheduledAt.toISOString()}.`,
+          notificationType: 'APPOINTMENT_CONFIRMED',
+          status: 'PENDING',
+          metadata: { appointmentId: appointment.id },
+        },
+      });
+
+      log.info(`Appointment ${id} confirmed by user ${user.id}`);
       return await tx.appointment.findUnique({
         where: { id: validatedId },
         select: { id: true, status: true },
       });
     });
   } catch (err) {
-    logger.error(`Failed to confirm appointment ${id}: ${err.message}`);
+    log.error(`Failed to confirm appointment ${id}: ${err.message}`);
     throw err;
   }
 };
 
-export const completeAppointment = async (id, user, logger) => {
+export const completeAppointment = async (id, user, log) => {
   try {
     const validatedId = idSchema.parse(id);
 
@@ -414,6 +506,8 @@ export const completeAppointment = async (id, user, logger) => {
         status: true,
         type: true,
         scheduledAt: true,
+        patient: { select: { firstName: true, lastName: true } },
+        doctor: { select: { firstName: true, lastName: true } },
       },
     });
 
@@ -424,7 +518,7 @@ export const completeAppointment = async (id, user, logger) => {
     }
 
     if (
-      user.role !== 'ADMIN' &&
+      user.role !== 'SUPER_ADMIN' &&
       user.id !== appointment.patientId &&
       user.id !== appointment.doctorId
     ) {
@@ -453,14 +547,36 @@ export const completeAppointment = async (id, user, logger) => {
         data: { status: 'COMPLETED' },
       });
 
-      logger.info(`Appointment ${id} completed by user ${user.id}`);
+      await tx.notification.create({
+        data: {
+          recipientId: appointment.patientId,
+          title: 'Appointment Completed',
+          body: `Your appointment with Dr. ${appointment.doctor.firstName} ${appointment.doctor.lastName} has been completed.`,
+          notificationType: 'APPOINTMENT_COMPLETED',
+          status: 'PENDING',
+          metadata: { appointmentId: appointment.id },
+        },
+      });
+
+      await tx.notification.create({
+        data: {
+          recipientId: appointment.doctorId,
+          title: 'Appointment Completed',
+          body: `You have completed an appointment with ${appointment.patient.firstName} ${appointment.patient.lastName}.`,
+          notificationType: 'APPOINTMENT_COMPLETED',
+          status: 'PENDING',
+          metadata: { appointmentId: appointment.id },
+        },
+      });
+
+      log.info(`Appointment ${id} completed by user ${user.id}`);
       return await tx.appointment.findUnique({
         where: { id: validatedId },
         select: { id: true, status: true },
       });
     });
   } catch (err) {
-    logger.error(`Failed to complete appointment ${id}: ${err.message}`);
+    log.error(`Failed to complete appointment ${id}: ${err.message}`);
     throw err;
   }
 };

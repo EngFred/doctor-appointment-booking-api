@@ -7,28 +7,39 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Represents a user (patient or admin) in the system
 model User {
-  id             String        @id @default(uuid())
-  firstName      String
-  lastName       String
-  email          String        @unique @map("email")
-  password       String
-  profilePicture String?
-  role           Role          @default(PATIENT)
-  refreshToken   String? // For JWT refresh tokens, store securely
-  metadata       Json? // Flexible storage for user preferences, e.g., FCM tokens
-  appointments   Appointment[] @relation("PatientAppointments")
-  messages       Message[]     @relation("SenderMessages")
-  payments       Payment[]     @relation("UserPayments")
-  notifications  Notification[] @relation("UserNotifications")
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id                 String         @id @default(uuid())
+  firstName          String         @map("first_name")
+  lastName           String         @map("last_name")
+  email              String         @unique
+  password           String         // Hashed in application layer
+  phone              String         @unique @map("phone_number") // Now required and unique
+  profilePicture     String?        @map("profile_picture")
+  role               Role           @default(PATIENT)
+  specialty          String?        // For Doctors only
+  hospitalId         String?        @map("hospital_id")
+  refreshToken       String?        @map("refresh_token")
+  fcmToken           String?        @map("fcm_token")
+
+  hospital           Hospital?      @relation("DoctorHospital", fields: [hospitalId], references: [id])
+  patientAppointments Appointment[] @relation("PatientAppointments")
+  doctorAppointments  Appointment[] @relation("DoctorAppointments")
+  payments           Payment[]      @relation("UserPayments")
+  availability       Availability[] @relation("DoctorAvailability")
+  notifications      Notification[] @relation("UserNotifications")
+  sentMessages       Message[]      @relation("SenderMessages")
+  receivedMessages   Message[]      @relation("ReceiverMessages")
+
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
 
   @@index([email])
+  @@index([role])
+  @@index([hospitalId])
+  @@index([phone]) // Added for uniqueness and queries
+  @@map("users")
 }
 
-/// Represents a hospital in the system
 model Hospital {
   id            String    @id @default(uuid())
   name          String
@@ -39,140 +50,124 @@ model Hospital {
   longitude     Float?
   about         String?
   services      String[]
-  contactPhone  String?
-  contactEmail  String? @map("contact_email")
+  field         String?
+  contactPhone  String?   @map("contact_phone")
+  contactEmail  String?   @map("contact_email")
   rating        Float?
-  doctors       Doctor[]
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  doctors       User[]    @relation("DoctorHospital")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   @@index([name])
   @@index([latitude, longitude])
+  @@index([field])
+  @@map("hospitals")
 }
 
-/// Represents a doctor in the system
-model Doctor {
-  id             String    @id @default(uuid())
-  firstName      String
-  lastName       String
-  specialty      String
-  hospitalId     String
-  profilePicture String?
-  hospital       Hospital  @relation(fields: [hospitalId], references: [id])
-  appointments   Appointment[] @relation("DoctorAppointments")
-  availability   Availability[] @relation("DoctorAvailability")
-  messages       Message[] @relation("ReceiverMessages")
-  metadata       Json? // Flexible storage, e.g., FCM tokens
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@index([hospitalId])
-  @@index([specialty])
-}
-
-/// Represents an appointment (in-person or virtual with video/audio/text)
 model Appointment {
   id               String           @id @default(uuid())
-  patientId        String
-  doctorId         String
-  availabilityId   String?          @unique
-  paymentId        String?          @unique
-  scheduledAt      DateTime
+  patientId        String           @map("patient_id")
+  doctorId         String           @map("doctor_id")
+  availabilityId   String?          @unique @map("availability_id")
+  paymentId        String?          @unique @map("payment_id")
+  scheduledAt      DateTime         @map("scheduled_at")
   type             AppointmentType
-  consultationType ConsultationType? // Mandatory for VIRTUAL; enforced in application layer
+  consultationType ConsultationType? @map("consultation_type")
   status           AppointmentStatus @default(PENDING)
-  sessionId        String? // For Agora video/audio session
-  startTime        DateTime? // Mandatory for VIRTUAL appointments; enforced in application layer
-  endTime          DateTime? // Mandatory for VIRTUAL appointments; enforced in application layer
-  duration         Int? // Duration in minutes for VIRTUAL appointments; enforced in application layer
-  location         String? // For in-person appointments
+  duration         Int?             // Default enforced in application layer
+  location         String?
   notes            String?
   metadata         Json?
-  patient          User            @relation("PatientAppointments", fields: [patientId], references: [id])
-  doctor           Doctor          @relation("DoctorAppointments", fields: [doctorId], references: [id])
-  availability     Availability?   @relation("AppointmentAvailability", fields: [availabilityId], references: [id])
-  payment          Payment?        @relation("AppointmentPayment", fields: [paymentId], references: [id])
-  messages         Message[]       @relation("AppointmentMessages")
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  patient          User             @relation("PatientAppointments", fields: [patientId], references: [id])
+  doctor           User             @relation("DoctorAppointments", fields: [doctorId], references: [id])
+  availability     Availability?    @relation("AppointmentAvailability", fields: [availabilityId], references: [id])
+  payment          Payment?         @relation("AppointmentPayment", fields: [paymentId], references: [id])
+  messages         Message[]
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
 
   @@index([doctorId, scheduledAt])
   @@index([patientId, status])
+  @@map("appointments")
 }
 
-/// Represents a chat message in a virtual appointment (for TEXT consultationType)
-model Message {
-  id             String      @id @default(uuid())
-  appointmentId  String
-  content        String
-  messageType    MessageType @default(TEXT)
-  senderId       String
-  receiverId     String
-  sentAt         DateTime    @default(now())
-  readAt         DateTime?
-  appointment    Appointment @relation("AppointmentMessages", fields: [appointmentId], references: [id])
-  sender         User        @relation("SenderMessages", fields: [senderId], references: [id])
-  receiver       Doctor      @relation("ReceiverMessages", fields: [receiverId], references: [id])
-
-  @@index([appointmentId, sentAt])
-}
-
-/// Represents a doctor's availability slot
 model Availability {
-  id        String   @id @default(uuid())
-  doctorId  String
-  startTime DateTime
-  endTime   DateTime
+  id        String    @id @default(uuid())
+  doctorId  String    @map("doctor_id")
+  startTime DateTime  @map("start_time")
+  endTime   DateTime  @map("end_time")
   status    AvailabilityStatus @default(AVAILABLE)
-  doctor    Doctor   @relation("DoctorAvailability", fields: [doctorId], references: [id])
+  doctor    User      @relation("DoctorAvailability", fields: [doctorId], references: [id])
   appointment Appointment? @relation("AppointmentAvailability")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@index([doctorId, startTime])
+  @@map("availabilities")
 }
 
-/// Represents a payment for an appointment
 model Payment {
-  id            String   @id @default(uuid())
-  userId        String
+  id            String    @id @default(uuid())
+  userId        String    @map("user_id")
   amount        Float
-  currency      Currency @default(UGX)
+  currency      Currency  @default(UGX)
   paymentMethod PaymentMethod
   paymentType   PaymentType
-  transactionId String?
-  txRef         String?
-  phone         String
-  email         String
+  transactionId String?   @map("transaction_id")
+  txRef         String?   @map("tx_ref")
+  phone         String?   @map("phone_number")
+  email         String?   @map("email_address") // Made optional
   status        PaymentStatus @default(PENDING)
-  paymentDate   DateTime?
-  user          User     @relation("UserPayments", fields: [userId], references: [id])
+  paymentDate   DateTime? @map("payment_date")
+  user          User      @relation("UserPayments", fields: [userId], references: [id])
   appointment   Appointment? @relation("AppointmentPayment")
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   @@index([userId, status])
+  @@map("payments")
 }
 
-/// Represents a notification sent to users
 model Notification {
   id               String   @id @default(uuid())
-  userId           String
+  recipientId      String   @map("recipient_id")
   title            String
   body             String
   notificationType NotificationType
   status           NotificationStatus @default(PENDING)
-  sentAt           DateTime?
-  user             User     @relation("UserNotifications", fields: [userId], references: [id])
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  sentAt           DateTime? @map("sent_at")
+  metadata         Json?
+  recipient        User     @relation("UserNotifications", fields: [recipientId], references: [id])
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  @@index([userId, sentAt])
+  @@index([recipientId, sentAt])
+  @@map("notifications")
+}
+
+model Message {
+  id             String         @id @default(uuid())
+  senderId       String         @map("sender_id")
+  receiverId     String         @map("receiver_id")
+  appointmentId  String?        @map("appointment_id")
+  content        String
+  type           MessageType    @default(TEXT)
+  status         MessageStatus  @default(SENT)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  sender         User           @relation("SenderMessages", fields: [senderId], references: [id])
+  receiver       User           @relation("ReceiverMessages", fields: [receiverId], references: [id])
+  appointment    Appointment?   @relation(fields: [appointmentId], references: [id])
+
+  @@index([senderId, receiverId, createdAt])
+  @@index([appointmentId])
+  @@map("messages")
 }
 
 enum Role {
   PATIENT
-  ADMIN
+  SUPER_ADMIN
+  DOCTOR
 }
 
 enum AppointmentType {
@@ -220,22 +215,29 @@ enum Currency {
   USD
 }
 
-enum MessageType {
-  TEXT
-  IMAGE
-  FILE
-}
-
 enum NotificationType {
+  APPOINTMENT_BOOKED
   APPOINTMENT_CONFIRMED
   APPOINTMENT_CANCELLED
+  APPOINTMENT_COMPLETED
   PAYMENT_SUCCESS
   PAYMENT_FAILED
-  MESSAGE_RECEIVED
 }
 
 enum NotificationStatus {
   PENDING
   SENT
   FAILED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  FILE
+}
+
+enum MessageStatus {
+  SENT
+  DELIVERED
+  READ
 }

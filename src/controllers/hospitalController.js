@@ -14,14 +14,15 @@ export const createHospital = async (req, res, next) => {
 
 export const getHospitals = async (req, res, next) => {
   try {
-    const { skip, take, name, services, latitude, longitude } = req.query;
+    const { skip, take, name, services, latitude, longitude, field } = req.query;
     const hospitals = await hospitalService.getHospitals({
       skip,
       take,
       name,
-      services: services ? services.split(',') : undefined,
+      services,
       latitude: latitude ? Number(latitude) : undefined,
       longitude: longitude ? Number(longitude) : undefined,
+      field,
     });
     res.status(200).json({
       status: 'success',

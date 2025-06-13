@@ -5,7 +5,7 @@ export const protect = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized. No token provided.' });
+    return res.status(401).json({ status: 'error', message: 'Unauthorized. No token provided.' });
   }
 
   const token = authHeader.split(' ')[1];
@@ -13,23 +13,39 @@ export const protect = async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await prisma.user.findUnique({
-      where: { id: decoded.userId },
+      where: { id: decoded.id },
       select: {
         id: true,
         firstName: true,
         lastName: true,
         email: true,
         role: true,
+        specialty: true,
+        hospitalId: true,
       },
     });
 
     if (!user) {
-      return res.status(401).json({ error: 'Unauthorized. User not found.' });
+      return res.status(401).json({ status: 'error', message: 'Unauthorized. User not found.' });
     }
 
     req.user = user;
     next();
   } catch (err) {
-    res.status(401).json({ error: 'Unauthorized. Invalid or expired token.' });
+    return res.status(401).json({ status: 'error', message: 'Unauthorized. Invalid or expired token.' });
   }
+};
+
+export const restrictToSuperAdmin = (req, res, next) => {
+  if (req.user.role !== 'SUPER_ADMIN') {
+    return res.status(403).json({ status: 'error', message: 'Forbidden. Super Admin access required.' });
+  }
+  next();
+};
+
+export const restrictToDoctor = (req, res, next) => {
+  if (req.user.role !== 'DOCTOR') {
+    return res.status(403).json({ status: 'error', message: 'Forbidden. Doctor access required.' });
+  }
+  next();
 };

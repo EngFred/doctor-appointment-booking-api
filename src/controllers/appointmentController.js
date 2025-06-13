@@ -18,7 +18,7 @@ export const getAppointments = async (req, res, next) => {
     const appointments = await appointmentService.getAppointments(
       { skip, take, status, doctorId },
       req.user,
-      req.logger,
+      req.log,
     );
     res.status(200).json({
       status: 'success',
@@ -29,10 +29,10 @@ export const getAppointments = async (req, res, next) => {
   }
 };
 
-export const getAppointmentById = async (req, res, body) => {
+export const getAppointmentById = async (req, res, next) => {
   try {
-    const appointment = await appointmentService.getAppointmentById(req.params.id, req.user, req.body);
-    res.status(201).json({
+    const appointment = await appointmentService.getAppointmentById(req.params.id, req.user, req.log);
+    res.status(200).json({
       status: 'success',
       data: appointment,
     });
@@ -46,8 +46,7 @@ export const cancelAppointment = async (req, res, next) => {
     const appointment = await appointmentService.cancelAppointment(
       req.params.id,
       req.user,
-      req.body.reason,
-      req.logger,
+      req.log,
     );
     res.status(200).json({
       status: 'success',

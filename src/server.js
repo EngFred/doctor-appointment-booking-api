@@ -10,6 +10,8 @@ import hospitalRoutes from './routes/hospitalRoutes.js';
 import availabilityRoutes from './routes/availabilityRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import appointmentRoutes from './routes/appointmentRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import messageRoutes from './routes/messageRoutes.js';
 import { ZodError } from 'zod';
 
 // Load environment variables
@@ -40,6 +42,8 @@ app.use('/api/hospitals', hospitalRoutes);
 app.use('/api/availability', availabilityRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/appointments', appointmentRoutes);
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/messages', messageRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

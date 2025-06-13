@@ -1,6 +1,6 @@
 import express from 'express';
 import * as appointmentController from '../controllers/appointmentController.js';
-import { protect } from '../middlewares/authMiddleware.js';
+import { protect, restrictToDoctor } from '../middlewares/authMiddleware.js';
 import rateLimit from 'express-rate-limit';
 
 const router = express.Router();
@@ -22,7 +22,7 @@ router.get('/', protect, getLimiter, appointmentController.getAppointments);
 router.get('/:id', protect, getLimiter, appointmentController.getAppointmentById);
 router.post('/:id/cancel', protect, getLimiter, appointmentController.cancelAppointment);
 router.post('/:id/join', protect, getLimiter, appointmentController.joinAppointment);
-router.post('/:id/confirm', protect, getLimiter, appointmentController.confirmAppointment);
+router.post('/:id/confirm', protect, restrictToDoctor, getLimiter, appointmentController.confirmAppointment);
 router.post('/:id/complete', protect, completeLimiter, appointmentController.completeAppointment);
 
 export default router;

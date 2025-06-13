@@ -1,7 +1,6 @@
 import express from 'express';
 import * as hospitalController from '../controllers/hospitalController.js';
-import { isAdmin } from '../middlewares/isAdmin.js';
-import { protect } from '../middlewares/authMiddleware.js';
+import { protect, restrictToSuperAdmin } from '../middlewares/authMiddleware.js';
 import rateLimit from 'express-rate-limit';
 import upload from '../middlewares/multer.js';
 
@@ -16,8 +15,8 @@ const getLimiter = rateLimit({
 router.get('/', protect, getLimiter, hospitalController.getHospitals);
 router.get('/:id', protect, getLimiter, hospitalController.getHospitalById);
 
-router.post('/', protect, isAdmin, upload.single('image'), hospitalController.createHospital);
-router.put('/:id', protect, isAdmin, upload.single('image'), hospitalController.updateHospital);
-router.delete('/:id', protect, isAdmin, hospitalController.deleteHospital);
+router.post('/', protect, restrictToSuperAdmin, upload.single('image'), hospitalController.createHospital);
+router.put('/:id', protect, restrictToSuperAdmin, upload.single('image'), hospitalController.updateHospital);
+router.delete('/:id', protect, restrictToSuperAdmin, hospitalController.deleteHospital);
 
 export default router;
